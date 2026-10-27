@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""fieldcut - print selected whitespace-separated fields from stdin or files."""
+import sys
+
+
+def parse_fields(spec):
+    if spec is None or spec == "":
+        print("fieldcut: --fields requires a comma-separated list of 1-based integers (e.g. 1,3)", file=sys.stderr)
+        sys.exit(2)
+    fields = []
+    for entry in spec.split(","):
+        entry = entry.strip()
+        if entry == "":
+            print(f"fieldcut: invalid --fields value: {spec!r}: empty entry", file=sys.stderr)
+            sys.exit(2)
+        try:
+            n = int(entry)
+        except ValueError:
+            print(f"fieldcut: invalid --fields value: {entry!r}: not an integer", file=sys.stderr)
+            sys.exit(2)
+        if n <= 0:
+            print(f"fieldcut: invalid --fields value: {entry!r}: must be >= 1", file=sys.stderr)
+            sys.exit(2)
+        fields.append(n)
+    if not fields:
+        print("fieldcut: --fields requires at least one field number", file=sys.stderr)
+        sys.exit(2)
+    return fields
+
+
+def print_usage(out):
+    out.write("Usage: fieldcut --fields 1,3 [--delimiter DELIM] [FILE ...]\n")
+    out.write("Print selected whitespace-separated fields from stdin or files.\n")
+    out.write("\n")
+    out.write("Options:\n")
+    out.write("  --fields FIELDS    Comma-separated 1-based field numbers (required, e.g. 1,3)\n")
+    out.write("  --delimiter DELIM  Output separator (default: TAB)\n")
+    out.write("  --help             Print this usage and exit 0\n")
+
+
+def main(argv):
+    fields_spec = None
+    delimiter = "\t"
+    files = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--help":
+            print_usage(sys.stdout)
+            return 0
+        elif arg == "--fields" and i + 1 < len(argv):
+            fields_spec = argv[i + 1]
+            i += 2
+        elif arg.startswith("--fields="):
+            fields_spec = arg[len("--fields="):]
+            i += 1
+        elif arg == "--delimiter" and i + 1 < len(argv):
+            delimiter = argv[i + 1]
+            i += 2
+        elif arg.startswith("--delimiter="):
+            delimiter = arg[len("--delimiter="):]
+            i += 1
+        elif arg == "--":
+            files.extend(argv[i + 1:])
+            break
+        elif arg.startswith("--"):
+            print(f"fieldcut: unknown option: {arg}", file=sys.stderr)
+            print_usage(sys.stderr)
+            return 2
+        else:
+            files.append(arg)
+            i += 1
+            continue
+    if fields_spec is None:
+        print("fieldcut: --fields is required", file=sys.stderr)
+        print_usage(sys.stderr)
+        return 2
+    fields = parse_fields(fields_spec)
+
+    if files:
+        streams = []
+        opened = []
+        try:
+            for path in files:
+                try:
+                    f = open(path, "r", encoding="utf-8")
+                except OSError as e:
+                    print(f"fieldcut: {path}: {e.strerror or e}", file=sys.stderr)
+                    return 1
+                streams.append(f)
+                opened.append(f)
+            rc = process_streams(streams, fields, delimiter)
+        finally:
+            for f in opened:
+                try:
+                    f.close()
+                except OSError:
+                    pass
+        return rc
+    else:
+        return process_streams([sys.stdin], fields, delimiter)
+
+
+def process_streams(streams, fields, delimiter):
+    out = sys.stdout
+    for stream in streams:
+        for line in stream:
+            if line.strip() == "":
+                continue
+            parts = line.split()
+            selected = [parts[n - 1] if n - 1 < len(parts) else "" for n in fields]
+            out.write(delimiter.join(selected) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
